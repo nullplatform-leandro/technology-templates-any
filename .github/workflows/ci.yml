@@ -1,6 +1,11 @@
 name: ci-nullplatform
 env:
   NULLPLATFORM_API_KEY: ${{ secrets.NULLPLATFORM_API_KEY }}
+  # Mirrors the asset provider configuration: path "nullplatform", namespaces as
+  # a path segment. The repository this build pushes to is
+  # <path>/<namespace-slug>/<application-slug>; change it in one place and this
+  # has to follow.
+  ECR_REPOSITORY_PATH: nullplatform
 on:
   push:
     branches:
@@ -32,6 +37,22 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::235494813897:role/github-actions-ecr-push
           aws-region: us-east-1
+      # ECR does not create repositories on push, and nothing else creates this
+      # one: the asset provider records the URI and stops there. It runs on every
+      # build rather than once at application creation on purpose -- a repository
+      # that is missing for any reason is then repaired by the next build instead
+      # of blocking it for good.
+      - name: Ensure the ECR repository exists
+        run: |
+          application=$(np application current --repository "https://github.com/${{ github.repository }}" --format json)
+          namespace=$(np namespace read --id "$(jq -r .namespace_id <<<"$application")" --format json)
+
+          repository="$ECR_REPOSITORY_PATH/$(jq -r .slug <<<"$namespace")/$(jq -r .slug <<<"$application")"
+          echo "ECR repository: $repository"
+
+          aws ecr describe-repositories --repository-names "$repository" >/dev/null 2>&1 \
+            || aws ecr create-repository --repository-name "$repository" >/dev/null
+
       - name: Log in to ECR
         run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 235494813897.dkr.ecr.us-east-1.amazonaws.com
       - name: Push asset
