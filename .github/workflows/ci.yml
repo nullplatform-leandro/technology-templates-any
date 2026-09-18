@@ -21,8 +21,21 @@ jobs:
         run: np build start
       - name: Build asset
         run: docker build -t main .
+      # The assets live in this account's ECR, so the runner authenticates to AWS
+      # itself and hands docker the credentials. `np asset push --no-login` then
+      # uses the login that is already there instead of doing its own.
+      #
+      # OIDC rather than an access key: the workflow already asks for
+      # `id-token: write`, so nothing has to be stored per repository.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::235494813897:role/github-actions-ecr-push
+          aws-region: us-east-1
+      - name: Log in to ECR
+        run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 235494813897.dkr.ecr.us-east-1.amazonaws.com
       - name: Push asset
-        run: np asset push --type docker-image --source main
+        run: np asset push --type docker-image --source main --no-login
       - name: End nullplatform CI
         if: ${{ always() }}
         run: np build update --status ${{ contains(fromJSON('["failure", "cancelled"]'), job.status) && 'failed' || 'successful' }}
